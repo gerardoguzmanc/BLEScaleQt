@@ -2,20 +2,42 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QBluetoothDeviceDiscoveryAgent> // Add this for Bluetooth device discovery
-#include <QBluetoothDeviceInfo>          // Add this for Bluetooth device information
-#include <QListWidget>                   // To display devices
-#include <QPushButton>                   // To start scan
-#include <QVBoxLayout>                   // To arrange widgets
-
-#include <QLowEnergyController> // Add this for BLE controller
-#include <QLabel> // To show connection status
-
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothDeviceInfo>
+#include <QListWidget>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QLowEnergyController>
+#include <QLowEnergyService>
+#include <QLowEnergyCharacteristic>
+#include <QLabel>
+#include <QMap>
 
 QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
+
+// --- Add this operator overload ---
+inline bool operator<(const QLowEnergyCharacteristic &lhs, const QLowEnergyCharacteristic &rhs)
+{
+    // QLowEnergyCharacteristic does not have a public unique ID or comparison
+    // directly. The most reliable way to compare them for map keys is by their UUID
+    // and potentially the service handle if UUIDs can be repeated across services
+    // in complex scenarios, but usually UUID is sufficient if chars are unique per service.
+    // However, the truly unique identifier for a characteristic within a service is its handle.
+    // QLowEnergyCharacteristic in Qt6 doesn't expose its handle directly for comparison.
+    // The UUID is the most accessible and reliable property for uniqueness.
+    // If UUIDs within a service are not guaranteed unique by the peripheral,
+    // this could cause issues. For most typical BLE devices, UUIDs for characteristics
+    // within a given service are unique.
+
+    // Update: As of Qt 6, QLowEnergyCharacteristic provides operator== and operator!=
+    // by default based on internal identity (which includes the handle).
+    // However, for std::map (which QMap uses internally), a strict weak ordering is needed.
+    // Comparing by UUID is the common approach.
+    return lhs.uuid() < rhs.uuid();
 }
+// ---------------------------------
+
+namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
@@ -40,16 +62,31 @@ private slots:
     void serviceDiscoveryFinished();
     void controllerError(QLowEnergyController::Error error);
 
-private:
-    Ui::MainWindow *ui;
-    QBluetoothDeviceDiscoveryAgent *discoveryAgent;
-    QListWidget *deviceListWidget;
-    QPushButton *scanButton;
-    QPushButton *connectButton; // New connect button
-    QLabel *statusLabel;        // New status label
+    // New slots for service and characteristic interaction
+    void onServiceSelected(); // Slot for when a service is selected in the list
+    void serviceDetailsDiscovered(QLowEnergyService::ServiceState newState);
+    void characteristicChanged(const QLowEnergyCharacteristic &characteristic, const QByteArray &newValue);
+    void characteristicRead(const QLowEnergyCharacteristic &characteristic, const QByteArray &value);
+    void descriptorWritten(const QLowEnergyDescriptor &descriptor, const QByteArray &newValue);
+    void serviceError(QLowEnergyService::ServiceError error); // Service-specific errors
 
-    QLowEnergyController *leController; // BLE controller
-    QBluetoothDeviceInfo m_currentDevice; // To store the selected device info
-    QList<QBluetoothUuid> m_serviceUuids; // To store discovered service UUIDs
+private:
+    Ui::MainWindow *ui; // This should be `nullptr` if not using .ui file
+    QBluetoothDeviceDiscoveryAgent *discoveryAgent;
+    QListWidget *deviceListWidget; // Will show devices initially, then services
+    QListWidget *characteristicListWidget; // New: To show characteristics and values
+    QPushButton *scanButton;
+    QPushButton *connectButton;
+    QPushButton *readCharButton; // New: Button to manually read selected characteristic
+    QLabel *statusLabel;
+
+    QLowEnergyController *leController;
+    QBluetoothDeviceInfo m_currentDevice;
+    QList<QBluetoothUuid> m_serviceUuids; // Stores discovered service UUIDs
+
+    // Maps to manage discovered services and characteristics
+    QMap<QBluetoothUuid, QLowEnergyService*> m_services; // Key: Service UUID, Value: Service object
+    QMap<QLowEnergyCharacteristic, QListWidgetItem*> m_characteristicItems; // Key: Characteristic, Value: List item for quick update
+    QLowEnergyService *m_currentService; // The currently selected service
 };
 #endif // MAINWINDOW_H
