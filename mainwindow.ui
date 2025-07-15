@@ -13,32 +13,7 @@
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
-  <widget class="QWidget" name="centralwidget">
-   <widget class="QPushButton" name="scanButton">
-    <property name="geometry">
-     <rect>
-      <x>70</x>
-      <y>220</y>
-      <width>100</width>
-      <height>32</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Scan</string>
-    </property>
-   </widget>
-   <widget class="QListWidget" name="deviceListWidget">
-    <property name="geometry">
-     <rect>
-      <x>190</x>
-      <y>150</y>
-      <width>256</width>
-      <height>192</height>
-     </rect>
-    </property>
-   </widget>
-  </widget>
-  <widget class="QStatusBar" name="statusbar"/>
+  <widget class="QWidget" name="centralwidget"/>
  </widget>
  <resources/>
  <connections/>
