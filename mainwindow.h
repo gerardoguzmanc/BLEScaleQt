@@ -78,7 +78,7 @@ private:
     QListWidget *characteristicListWidget; // New: To show characteristics and values
     QPushButton *scanButton;
     QPushButton *connectButton;
-    QPushButton *readCharButton; // New: Button to manually read selected characteristic
+    //QPushButton *readCharButton; // New: Button to manually read selected characteristic
     QLabel *statusLabel;
     QComboBox *deviceComboBox;
 
