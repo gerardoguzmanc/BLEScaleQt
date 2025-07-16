@@ -5,6 +5,7 @@
 #include <QBluetoothDeviceDiscoveryAgent>
 #include <QBluetoothDeviceInfo>
 #include <QListWidget>
+#include <QComboBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QLowEnergyController>
@@ -79,6 +80,7 @@ private:
     QPushButton *connectButton;
     QPushButton *readCharButton; // New: Button to manually read selected characteristic
     QLabel *statusLabel;
+    QComboBox *deviceComboBox;
 
     QLowEnergyController *leController;
     QBluetoothDeviceInfo m_currentDevice;

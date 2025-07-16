@@ -4,31 +4,33 @@
 #include <QBluetoothPermission>
 #include <QLowEnergyDescriptor>
 #include <QApplication>
+#include <QComboBox> // Add this include for QComboBox
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(nullptr) // Set to nullptr since you're not using a .ui file
+    , ui(nullptr)
     , leController(nullptr)
-    , m_currentService(nullptr) // Initialize current service pointer
+    , m_currentService(nullptr)
 {
     // --- UI Setup ---
-    deviceListWidget = new QListWidget(this); // Shows devices, then services
-    characteristicListWidget = new QListWidget(this); // Shows characteristics and their values
+    // Change from QListWidget to QComboBox
+    deviceComboBox = new QComboBox(this); // New: QComboBox for devices/services
+    characteristicListWidget = new QListWidget(this); // Remains a QListWidget
     scanButton = new QPushButton("Start Bluetooth Scan", this);
     connectButton = new QPushButton("Connect to Selected Device", this);
     connectButton->setEnabled(false);
-    readCharButton = new QPushButton("Read Selected Characteristic", this); // New button
-    readCharButton->setEnabled(false); // Disable initially
+    readCharButton = new QPushButton("Read Selected Characteristic", this);
+    readCharButton->setEnabled(false);
     statusLabel = new QLabel("Status: Idle", this);
 
     // Create a main layout to hold two vertical sub-layouts (one for devices/services, one for characteristics)
     QHBoxLayout *mainHorizontalLayout = new QHBoxLayout();
 
-    // Left side: Scan/Connect buttons and Device/Service List
+    // Left side: Scan/Connect buttons and Device/Service List (now QComboBox)
     QVBoxLayout *leftLayout = new QVBoxLayout();
     leftLayout->addWidget(scanButton);
     leftLayout->addWidget(connectButton);
-    leftLayout->addWidget(deviceListWidget); // This will switch between devices and services
+    leftLayout->addWidget(deviceComboBox); // Use deviceComboBox here
 
     // Right side: Characteristic List and Read Button
     QVBoxLayout *rightLayout = new QVBoxLayout();
@@ -58,34 +60,37 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::scanError);
 
     // --- Connect Button Logic ---
+    // Change signal from itemSelectionChanged to currentIndexChanged
     connect(connectButton, &QPushButton::clicked, this, &MainWindow::connectToDevice);
-    connect(deviceListWidget, &QListWidget::itemSelectionChanged, this, [this]() {
-        bool enableConnect = deviceListWidget->selectedItems().count() > 0 &&
-                             !deviceListWidget->currentItem()->text().contains("No") &&
-                             !deviceListWidget->currentItem()->text().contains("found");
+    connect(deviceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        bool enableConnect = index >= 0 &&
+                             !deviceComboBox->currentText().contains("No") &&
+                             !deviceComboBox->currentText().contains("found") &&
+                             !deviceComboBox->currentText().contains("--- Discovered Services ---"); // Exclude separator
         connectButton->setEnabled(enableConnect);
         readCharButton->setEnabled(false); // Disable read button until char is selected
-        // When device/service selection changes, clear characteristic list
         characteristicListWidget->clear();
 
         // If the selected item is a service (after service discovery is complete)
+        // This logic needs to be adjusted slightly, as currentIndexChanged fires
+        // when the combobox is populated, not necessarily when a service is selected *after* discovery.
+        // It's better to trigger onServiceSelected only when connectToDevice is done and services are ready.
+        // For now, keep the existing logic and we'll refine if issues arise.
         if (leController && leController->state() == QLowEnergyController::DiscoveredState) {
-            onServiceSelected();
+            onServiceSelected(); // This will now be called when a service is selected from the combobox
         }
     });
 
-    // --- New: Read Characteristic Button Logic ---
+
+    // --- New: Read Characteristic Button Logic (remains same) ---
     connect(readCharButton, &QPushButton::clicked, this, [this]() {
         if (characteristicListWidget->selectedItems().isEmpty()) {
             QMessageBox::warning(this, "No Characteristic Selected", "Please select a characteristic to read.");
             return;
         }
-        // This relies on the QListWidgetItem storing the characteristic
-        // For simplicity, we'll iterate and find it, but a map is better for large lists
         QListWidgetItem *selectedItem = characteristicListWidget->currentItem();
         for (auto it = std::as_const(m_characteristicItems).begin(); it != std::as_const(m_characteristicItems).end(); ++it) {
             if (it.value() == selectedItem) {
-                // Read the characteristic
                 if (it.key().properties() & QLowEnergyCharacteristic::Read) {
                     if (m_currentService) {
                         m_currentService->readCharacteristic(it.key());
@@ -105,7 +110,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(characteristicListWidget, &QListWidget::itemSelectionChanged, this, [this]() {
         readCharButton->setEnabled(characteristicListWidget->selectedItems().count() > 0);
     });
-
 
     // --- Android Permissions (remains same) ---
 #if QT_CONFIG(permissions) && defined(Q_OS_ANDROID)
@@ -162,19 +166,19 @@ MainWindow::~MainWindow()
 // --- Bluetooth Scan Slots ---
 void MainWindow::startScan()
 {
-    deviceListWidget->clear(); // Clear previous scan results (devices or services)
-    characteristicListWidget->clear(); // Clear characteristic list
+    deviceComboBox->clear(); // Change: Clear the QComboBox
+    characteristicListWidget->clear();
     statusLabel->setText("Status: Scanning...");
     qDebug() << "Starting Bluetooth device scan...";
     scanButton->setEnabled(false);
     connectButton->setEnabled(false);
     readCharButton->setEnabled(false);
-    m_serviceUuids.clear(); // Clear previous service UUIDs
-    m_services.clear();     // Clear service objects
-    m_characteristicItems.clear(); // Clear characteristic items
-    m_currentService = nullptr; // Reset current service
+    m_serviceUuids.clear();
+    m_services.clear();
+    m_characteristicItems.clear();
+    m_currentService = nullptr;
 
-    if (leController) { // Disconnect if already connected
+    if (leController) {
         leController->disconnectFromDevice();
         leController->deleteLater();
         leController = nullptr;
@@ -183,12 +187,14 @@ void MainWindow::startScan()
     discoveryAgent->start(QBluetoothDeviceDiscoveryAgent::DiscoveryMethod::LowEnergyMethod);
 }
 
+
+
 void MainWindow::deviceDiscovered(const QBluetoothDeviceInfo &device)
 {
     if (device.coreConfigurations() & QBluetoothDeviceInfo::LowEnergyCoreConfiguration) {
         QString itemText = device.name().isEmpty() ? "(Unknown BLE Device)" : device.name();
         itemText += " (" + device.address().toString() + ")";
-        deviceListWidget->addItem(itemText);
+        deviceComboBox->addItem(itemText); // Change: Add item to QComboBox
         qDebug() << "Discovered BLE device:" << itemText;
     }
 }
@@ -198,11 +204,10 @@ void MainWindow::scanFinished()
     qDebug() << "Bluetooth scan finished.";
     statusLabel->setText("Status: Scan Finished.");
     scanButton->setEnabled(true);
-    if (deviceListWidget->count() == 0) {
-        deviceListWidget->addItem("No Bluetooth devices found.");
+    if (deviceComboBox->count() == 0) { // Change: Check QComboBox count
+        deviceComboBox->addItem("No Bluetooth devices found."); // Change: Add item to QComboBox
         connectButton->setEnabled(false);
     } else {
-        // If devices found, allow selection for connection
         connectButton->setEnabled(true);
     }
 }
@@ -233,19 +238,79 @@ void MainWindow::scanError(QBluetoothDeviceDiscoveryAgent::Error error)
 }
 
 // --- BLE Connection Slots ---
+void MainWindow::deviceDisconnected()
+{
+    qDebug() << "Disconnected from BLE device.";
+    statusLabel->setText("Status: Disconnected.");
+    connectButton->setEnabled(true);
+    scanButton->setEnabled(true);
+    readCharButton->setEnabled(false);
+
+    if (leController) {
+        leController->deleteLater();
+        leController = nullptr;
+    }
+    for (QLowEnergyService *service : std::as_const(m_services)) {
+        if (service) service->deleteLater();
+    }
+    m_services.clear();
+    m_serviceUuids.clear();
+    m_characteristicItems.clear();
+    m_currentService = nullptr;
+    deviceComboBox->clear(); // Change: Clear the QComboBox
+    characteristicListWidget->clear();
+}
+
+
+void MainWindow::controllerStateChanged(QLowEnergyController::ControllerState state)
+{
+    qDebug() << "BLE Controller State Changed:" << state;
+    switch (state) {
+    case QLowEnergyController::UnconnectedState:
+        statusLabel->setText("Status: Unconnected.");
+        break;
+    case QLowEnergyController::ConnectingState:
+        statusLabel->setText("Status: Connecting...");
+        break;
+    case QLowEnergyController::ConnectedState:
+        statusLabel->setText("Status: Connected, Discovering Services...");
+        break;
+    case QLowEnergyController::DiscoveringState:
+        statusLabel->setText("Status: Discovering Services...");
+        break;
+    case QLowEnergyController::DiscoveredState:
+        statusLabel->setText("Status: Services Discovered.");
+        break;
+    case QLowEnergyController::ClosingState:
+        statusLabel->setText("Status: Disconnecting...");
+        break;
+    default:
+        statusLabel->setText("Status: Unknown state.");
+        break;
+    }
+}
+
+void MainWindow::deviceConnected()
+{
+    qDebug() << "Connected to BLE device.";
+    statusLabel->setText("Status: Connected! Discovering services...");
+    leController->discoverServices(); // Start discovering services
+}
+
 
 void MainWindow::connectToDevice()
 {
-    if (deviceListWidget->selectedItems().isEmpty()) {
+    // Change: Check if there's a selected item in QComboBox
+    if (deviceComboBox->currentIndex() == -1 || deviceComboBox->currentText().contains("No Bluetooth devices found.")) {
         QMessageBox::warning(this, "No Device Selected", "Please select a device from the list to connect.");
         return;
     }
 
-    QString selectedText = deviceListWidget->currentItem()->text();
+    QString selectedText = deviceComboBox->currentText(); // Change: Get current text from QComboBox
     QBluetoothAddress deviceAddress(selectedText.section('(', -1).remove(')'));
 
     QList<QBluetoothDeviceInfo> discoveredDevices = discoveryAgent->discoveredDevices();
-    m_currentDevice = QBluetoothDeviceInfo(); // Reset
+    m_currentDevice = QBluetoothDeviceInfo();
     for (const QBluetoothDeviceInfo &device : std::as_const(discoveredDevices)) {
         if (device.address() == deviceAddress) {
             m_currentDevice = device;
@@ -258,7 +323,6 @@ void MainWindow::connectToDevice()
         return;
     }
 
-    // Clean up previous controller and services if any
     if (leController) {
         leController->disconnectFromDevice();
         leController->deleteLater();
@@ -296,68 +360,10 @@ void MainWindow::connectToDevice()
     statusLabel->setText(QString("Status: Connecting to %1...").arg(m_currentDevice.name()));
     qDebug() << "Attempting to connect to BLE device:" << m_currentDevice.name() << m_currentDevice.address().toString();
     leController->connectToDevice();
-    connectButton->setEnabled(false); // Disable connect button during connection attempt
-    scanButton->setEnabled(false);    // Disable scan button too
+    connectButton->setEnabled(false);
+    scanButton->setEnabled(false);
 }
 
-void MainWindow::controllerStateChanged(QLowEnergyController::ControllerState state)
-{
-    qDebug() << "BLE Controller State Changed:" << state;
-    switch (state) {
-    case QLowEnergyController::UnconnectedState:
-        statusLabel->setText("Status: Unconnected.");
-        break;
-    case QLowEnergyController::ConnectingState:
-        statusLabel->setText("Status: Connecting...");
-        break;
-    case QLowEnergyController::ConnectedState:
-        statusLabel->setText("Status: Connected, Discovering Services...");
-        break;
-    case QLowEnergyController::DiscoveringState:
-        statusLabel->setText("Status: Discovering Services...");
-        break;
-    case QLowEnergyController::DiscoveredState:
-        statusLabel->setText("Status: Services Discovered.");
-        break;
-    case QLowEnergyController::ClosingState:
-        statusLabel->setText("Status: Disconnecting...");
-        break;
-    default:
-        statusLabel->setText("Status: Unknown state.");
-        break;
-    }
-}
-
-void MainWindow::deviceConnected()
-{
-    qDebug() << "Connected to BLE device.";
-    statusLabel->setText("Status: Connected! Discovering services...");
-    leController->discoverServices(); // Start discovering services
-}
-
-void MainWindow::deviceDisconnected()
-{
-    qDebug() << "Disconnected from BLE device.";
-    statusLabel->setText("Status: Disconnected.");
-    connectButton->setEnabled(true); // Re-enable connect for another attempt
-    scanButton->setEnabled(true);    // Re-enable scan
-    readCharButton->setEnabled(false); // Disable read button
-
-    // Clean up controller and services
-    if (leController) {
-        leController->deleteLater();
-        leController = nullptr;
-    }
-    for (QLowEnergyService *service : std::as_const(m_services)) {
-        if (service) service->deleteLater();
-    }
-    m_services.clear();
-    m_serviceUuids.clear();
-    m_characteristicItems.clear();
-    m_currentService = nullptr;
-    deviceListWidget->clear(); // Clear both lists on disconnect
-    characteristicListWidget->clear();
-}
 
 void MainWindow::serviceDiscovered(const QBluetoothUuid &uuid)
 {
@@ -370,10 +376,10 @@ void MainWindow::serviceDiscoveryFinished()
     qDebug() << "Service discovery finished. Found" << m_serviceUuids.count() << "services.";
     statusLabel->setText("Status: Services Discovered. Select a service.");
 
-    deviceListWidget->clear(); // Clear the device list to show services
-    deviceListWidget->addItem("--- Discovered Services ---");
+    deviceComboBox->clear(); // Change: Clear the QComboBox
+    deviceComboBox->addItem("--- Discovered Services ---"); // Change: Add separator to QComboBox
     if (m_serviceUuids.isEmpty()) {
-        deviceListWidget->addItem("No services found on this device.");
+        deviceComboBox->addItem("No services found on this device."); // Change: Add item to QComboBox
     } else {
         for (const QBluetoothUuid &uuid : std::as_const(m_serviceUuids)) {
             QString serviceInfo = uuid.toString();
@@ -381,13 +387,13 @@ void MainWindow::serviceDiscoveryFinished()
             // if (uuid.isWellKnownUuid()) { // This check requires Qt 6.0+
             //     serviceInfo += " (" + QBluetoothUuid::uuidToName(uuid) + ")";
             // }
-            deviceListWidget->addItem(serviceInfo);
+            deviceComboBox->addItem(serviceInfo); // Change: Add item to QComboBox
         }
     }
-    connectButton->setEnabled(false); // Keep connect disabled
-    scanButton->setEnabled(true); // Allow new scan if needed
-    // The readCharButton remains disabled until a characteristic is selected
+    connectButton->setEnabled(false);
+    scanButton->setEnabled(true);
 }
+
 
 void MainWindow::controllerError(QLowEnergyController::Error error)
 {
@@ -413,7 +419,7 @@ void MainWindow::controllerError(QLowEnergyController::Error error)
     case QLowEnergyController::RemoteHostClosedError:
         errorString = "Remote host closed connection.";
         break;
-/*
+        /*
     case QLowEnergyController::PermissionError:
         errorString = "Permission error (check AndroidManifest.xml and runtime permissions).";
         break;
@@ -424,7 +430,6 @@ void MainWindow::controllerError(QLowEnergyController::Error error)
     }
     QMessageBox::critical(this, "BLE Controller Error", errorString);
 
-    // Ensure controller and services are cleaned up on error
     if (leController) {
         leController->deleteLater();
         leController = nullptr;
@@ -436,32 +441,29 @@ void MainWindow::controllerError(QLowEnergyController::Error error)
     m_serviceUuids.clear();
     m_characteristicItems.clear();
     m_currentService = nullptr;
-    deviceListWidget->clear();
+    deviceComboBox->clear(); // Change: Clear the QComboBox
     characteristicListWidget->clear();
 }
 
 // --- New: Service and Characteristic Interaction Slots ---
-
 void MainWindow::onServiceSelected()
 {
-    if (deviceListWidget->selectedItems().isEmpty() || !leController ||
-        leController->state() != QLowEnergyController::DiscoveredState) {
+    // Change: Check if an item is selected in QComboBox
+    if (deviceComboBox->currentIndex() == -1 || !leController ||
+        leController->state() != QLowEnergyController::DiscoveredState ||
+        deviceComboBox->currentText().contains("--- Discovered Services ---") || // Don't try to select the separator
+        deviceComboBox->currentText().contains("No services found")) {
         return;
     }
 
-    QString selectedServiceText = deviceListWidget->currentItem()->text();
-    // Extract UUID from the displayed text (e.g., "0000180a-0000-1000-8000-00805f9b34fb (Device Information)")
+    QString selectedServiceText = deviceComboBox->currentText(); // Change: Get current text from QComboBox
     QString uuidString = selectedServiceText.split(" ").first();
     QBluetoothUuid selectedUuid(uuidString);
 
-    // Check if we already have this service object
     if (m_services.contains(selectedUuid)) {
         m_currentService = m_services.value(selectedUuid);
         qDebug() << "Service already known, displaying characteristics for:" << selectedUuid.toString();
-        // If characteristics were already discovered for this service, display them directly
-        // Otherwise, discoverDetails() needs to be called again or waited for if already in progress
         if (m_currentService->state() == QLowEnergyService::RemoteServiceDiscovered) {
-            // Redisplay characteristics if changing selection
             characteristicListWidget->clear();
             m_characteristicItems.clear();
             for (const QLowEnergyCharacteristic &characteristic : m_currentService->characteristics()) {
@@ -473,28 +475,25 @@ void MainWindow::onServiceSelected()
                 characteristicListWidget->addItem(item);
                 m_characteristicItems.insert(characteristic, item);
 
-                // Initial read for readable characteristics
                 if (characteristic.properties() & QLowEnergyCharacteristic::Read) {
                     m_currentService->readCharacteristic(characteristic);
                 }
-                // Enable notifications/indications
                 if (characteristic.properties() & (QLowEnergyCharacteristic::Notify | QLowEnergyCharacteristic::Indicate)) {
                     QLowEnergyDescriptor notificationDescriptor = characteristic.descriptor(QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
                     if (notificationDescriptor.isValid()) {
-                        m_currentService->writeDescriptor(notificationDescriptor, QByteArray::fromHex("0100")); // Enable Notifications
+                        m_currentService->writeDescriptor(notificationDescriptor, QByteArray::fromHex("0100"));
                         qDebug() << "Enabled notifications for characteristic:" << characteristic.uuid().toString();
                     }
                 }
             }
         }
     } else {
-        // If not, create and discover details for the selected service
         QLowEnergyService *service = leController->createServiceObject(selectedUuid, this);
         if (service) {
             m_services.insert(selectedUuid, service);
-            m_currentService = service; // Set as current
-            characteristicListWidget->clear(); // Clear old characteristics
-            m_characteristicItems.clear(); // Clear old characteristic items
+            m_currentService = service;
+            characteristicListWidget->clear();
+            m_characteristicItems.clear();
 
             connect(service, &QLowEnergyService::stateChanged,
                     this, &MainWindow::serviceDetailsDiscovered);
@@ -508,7 +507,7 @@ void MainWindow::onServiceSelected()
                     this, &MainWindow::descriptorWritten);
 
             statusLabel->setText(QString("Status: Discovering characteristics for %1...").arg(selectedServiceText));
-            service->discoverDetails(); // Start discovering characteristics for this service
+            service->discoverDetails();
         } else {
             statusLabel->setText("Status: Failed to create service object.");
             qWarning() << "Failed to create service object for:" << selectedUuid.toString();
@@ -516,6 +515,7 @@ void MainWindow::onServiceSelected()
         }
     }
 }
+
 
 void MainWindow::serviceDetailsDiscovered(QLowEnergyService::ServiceState newState)
 {
