@@ -80,6 +80,7 @@ private:
     QPushButton *connectButton;
     //QPushButton *readCharButton; // New: Button to manually read selected characteristic
     QLabel *statusLabel;
+    QLabel *characteristicValueLabel;
     QComboBox *deviceComboBox;
 
     QLowEnergyController *leController;

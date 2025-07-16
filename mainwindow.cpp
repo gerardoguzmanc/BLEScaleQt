@@ -21,6 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
     connectButton->setEnabled(false);
     // readCharButton removed
     statusLabel = new QLabel("Status: Idle", this);
+    characteristicValueLabel = new QLabel("Characteristic Value: N/A", this); // New: Label for characteristic value
 
     // Create a main layout to hold two vertical sub-layouts (one for devices/services, one for characteristics)
     QHBoxLayout *mainHorizontalLayout = new QHBoxLayout();
@@ -34,6 +35,7 @@ MainWindow::MainWindow(QWidget *parent)
     // Right side: Characteristic List (read button removed)
     QVBoxLayout *rightLayout = new QVBoxLayout();
     rightLayout->addWidget(characteristicListWidget); // Only characteristic list
+    rightLayout->addWidget(characteristicValueLabel); // Add the new label here
 
     mainHorizontalLayout->addLayout(leftLayout);
     mainHorizontalLayout->addLayout(rightLayout);
@@ -68,19 +70,13 @@ MainWindow::MainWindow(QWidget *parent)
         connectButton->setEnabled(enableConnect);
         // readCharButton->setEnabled(false); // Removed: Disable read button
         characteristicListWidget->clear();
+        characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear value when selection changes
 
         // If the selected item is a service (after service discovery is complete)
         if (leController && leController->state() == QLowEnergyController::DiscoveredState) {
             onServiceSelected(); // This will now be called when a service is selected from the combobox
         }
     });
-
-    // Removed: Read Characteristic Button Logic
-
-    // Removed: Enable read button only when a characteristic item is selected
-    // connect(characteristicListWidget, &QListWidget::itemSelectionChanged, this, [this]() {
-    //     readCharButton->setEnabled(characteristicListWidget->selectedItems().count() > 0);
-    // });
 
     // --- Android Permissions (remains same) ---
 #if QT_CONFIG(permissions) && defined(Q_OS_ANDROID)
@@ -512,29 +508,50 @@ void MainWindow::serviceDetailsDiscovered(QLowEnergyService::ServiceState newSta
 
 void MainWindow::characteristicChanged(const QLowEnergyCharacteristic &characteristic, const QByteArray &newValue)
 {
-    // This slot is called when a characteristic's value changes (due to notification/indication)
     qDebug() << "Characteristic Changed:" << characteristic.uuid().toString() << "New Value:" << newValue.toHex();
-    if (m_characteristicItems.contains(characteristic)) {
-        QListWidgetItem *item = m_characteristicItems.value(characteristic);
-        QString charInfo = QString("Value: %1 (Hex) / %2")
+    // Update the dedicated label with the value
+    QString valueDisplay = QString("Value: %1 (Hex) / %2")
                                .arg(newValue.toHex().toUpper())
-                               .arg(QString::fromUtf8(newValue)); // Try to decode as UTF-8
+                               .arg(QString::fromUtf8(newValue));
+    characteristicValueLabel->setText(valueDisplay);
+
+    // Optionally, if you still want to update the list item's text to show the *current* value
+    // alongside its properties, you can modify the item text like this:
+/*    if (m_characteristicItems.contains(characteristic)) {
+        QListWidgetItem *item = m_characteristicItems.value(characteristic);
+        QString charInfo = QString("Char: %1 (%2)\nValue: %3 (Hex) / %4")
+                               .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
+                               .arg(characteristic.uuid().toString())
+                               .arg(newValue.toHex().toUpper())
+                               .arg(QString::fromUtf8(newValue));
         item->setText(charInfo);
-    }
+        }
+*/
+
 }
 
 void MainWindow::characteristicRead(const QLowEnergyCharacteristic &characteristic, const QByteArray &value)
 {
-    // This slot is called after a readCharacteristic() request completes
     qDebug() << "Characteristic Read:" << characteristic.uuid().toString() << "Value:" << value.toHex();
+    // Update the dedicated label with the value
+    QString valueDisplay = QString("Value: %1 (Hex) / %2")
+                               .arg(value.toHex().toUpper())
+                               .arg(QString::fromUtf8(value));
+    characteristicValueLabel->setText(valueDisplay);
+
+    // Optionally, if you still want to update the list item's text to show the *read* value
+    // alongside its properties, you can modify the item text like this:
+/*
     if (m_characteristicItems.contains(characteristic)) {
         QListWidgetItem *item = m_characteristicItems.value(characteristic);
-        QString charInfo = QString("Value: %1 (Hex) / %2")
-
+        QString charInfo = QString("Char: %1 (%2)\nValue: %3 (Hex) / %4")
+                               .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
+                               .arg(characteristic.uuid().toString())
                                .arg(value.toHex().toUpper())
-                               .arg(QString::fromUtf8(value)); // Try to decode as UTF-8
+                               .arg(QString::fromUtf8(value));
         item->setText(charInfo);
     }
+*/
 }
 
 void MainWindow::descriptorWritten(const QLowEnergyDescriptor &descriptor, const QByteArray &newValue)
