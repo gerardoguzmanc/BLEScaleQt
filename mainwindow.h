@@ -74,8 +74,8 @@ private slots:
 private:
     Ui::MainWindow *ui; // This should be `nullptr` if not using .ui file
     QBluetoothDeviceDiscoveryAgent *discoveryAgent;
-    QListWidget *deviceListWidget; // Will show devices initially, then services
-    QListWidget *characteristicListWidget; // New: To show characteristics and values
+    //QListWidget *deviceListWidget; // Will show devices initially, then services
+    //QListWidget *characteristicListWidget; // New: To show characteristics and values
     QPushButton *scanButton;
     QPushButton *connectButton;
     //QPushButton *readCharButton; // New: Button to manually read selected characteristic

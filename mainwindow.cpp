@@ -13,36 +13,36 @@ MainWindow::MainWindow(QWidget *parent)
     , m_currentService(nullptr)
 {
     // --- UI Setup ---
-    // Change from QListWidget to QComboBox
-    deviceComboBox = new QComboBox(this); // New: QComboBox for devices/services
-    characteristicListWidget = new QListWidget(this); // Remains a QListWidget
+    deviceComboBox = new QComboBox(this); // QComboBox for devices/services
+    // characteristicListWidget removed
     scanButton = new QPushButton("Start Bluetooth Scan", this);
     connectButton = new QPushButton("Connect to Selected Device", this);
     connectButton->setEnabled(false);
-    // readCharButton removed
     statusLabel = new QLabel("Status: Idle", this);
-    characteristicValueLabel = new QLabel("Characteristic Value: N/A", this); // New: Label for characteristic value
+    characteristicValueLabel = new QLabel("Characteristic Value: N/A", this); // Label for characteristic value
+    // *** MODIFICATION START ***
+    // Set a larger font for the characteristicValueLabel
+    QFont labelFont = characteristicValueLabel->font();
+    labelFont.setPointSize(24); // Increase font size to 16 points (adjust as needed)
+    characteristicValueLabel->setFont(labelFont);
 
-    // Create a main layout to hold two vertical sub-layouts (one for devices/services, one for characteristics)
-    QHBoxLayout *mainHorizontalLayout = new QHBoxLayout();
+    // Optional: Set word wrap if the value can be long
+    characteristicValueLabel->setWordWrap(true);
 
-    // Left side: Scan/Connect buttons and Device/Service List (now QComboBox)
-    QVBoxLayout *leftLayout = new QVBoxLayout();
-    leftLayout->addWidget(scanButton);
-    leftLayout->addWidget(connectButton);
-    leftLayout->addWidget(deviceComboBox); // Use deviceComboBox here
+    // Optional: Align text to center or left/right as desired
+    characteristicValueLabel->setAlignment(Qt::AlignCenter);
 
-    // Right side: Characteristic List (read button removed)
-    QVBoxLayout *rightLayout = new QVBoxLayout();
-    rightLayout->addWidget(characteristicListWidget); // Only characteristic list
-    rightLayout->addWidget(characteristicValueLabel); // Add the new label here
-
-    mainHorizontalLayout->addLayout(leftLayout);
-    mainHorizontalLayout->addLayout(rightLayout);
-
-    // Main vertical layout for status label and the combined horizontal layout
+    // Optional: Set a minimum height to ensure it takes up some space even if text is short
+    // characteristicValueLabel->setMinimumHeight(100); // Example: 100 pixels minimum height
+    // *** MODIFICATION END ***
+    // Create a main layout
     QVBoxLayout *mainLayout = new QVBoxLayout();
-    mainLayout->addLayout(mainHorizontalLayout);
+
+    // Add elements to the main layout
+    mainLayout->addWidget(scanButton);
+    mainLayout->addWidget(connectButton);
+    mainLayout->addWidget(deviceComboBox); // Device/Service ComboBox
+    mainLayout->addWidget(characteristicValueLabel); // Characteristic Value Label
     mainLayout->addWidget(statusLabel);
 
     QWidget *centralWidget = new QWidget(this);
@@ -60,21 +60,19 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::scanError);
 
     // --- Connect Button Logic ---
-    // Change signal from itemSelectionChanged to currentIndexChanged
     connect(connectButton, &QPushButton::clicked, this, &MainWindow::connectToDevice);
     connect(deviceComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         bool enableConnect = index >= 0 &&
                              !deviceComboBox->currentText().contains("No") &&
                              !deviceComboBox->currentText().contains("found") &&
-                             !deviceComboBox->currentText().contains("--- Discovered Services ---"); // Exclude separator
+                             !deviceComboBox->currentText().contains("--- Discovered Services ---");
         connectButton->setEnabled(enableConnect);
-        // readCharButton->setEnabled(false); // Removed: Disable read button
-        characteristicListWidget->clear();
         characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear value when selection changes
 
-        // If the selected item is a service (after service discovery is complete)
+        // This will attempt to discover characteristics for the selected service
+        // if we are already in DiscoveredState (i.e., connected to a device)
         if (leController && leController->state() == QLowEnergyController::DiscoveredState) {
-            onServiceSelected(); // This will now be called when a service is selected from the combobox
+            onServiceSelected();
         }
     });
 
@@ -107,15 +105,13 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Clean up QLowEnergyService objects
     for (QLowEnergyService *service : std::as_const(m_services)) {
         if (service) {
-            // Optional: Disable notifications before deleting service
             for (const QLowEnergyCharacteristic &characteristic : service->characteristics()) {
                 if (characteristic.properties() & (QLowEnergyCharacteristic::Notify | QLowEnergyCharacteristic::Indicate)) {
                     QLowEnergyDescriptor notificationDescriptor = characteristic.descriptor(QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
                     if (notificationDescriptor.isValid()) {
-                        service->writeDescriptor(notificationDescriptor, QByteArray(2, 0)); // Turn off notifications
+                        service->writeDescriptor(notificationDescriptor, QByteArray(2, 0));
                     }
                 }
             }
@@ -133,16 +129,16 @@ MainWindow::~MainWindow()
 // --- Bluetooth Scan Slots ---
 void MainWindow::startScan()
 {
-    deviceComboBox->clear(); // Change: Clear the QComboBox
-    characteristicListWidget->clear();
+    deviceComboBox->clear();
+    // characteristicListWidget removed
+    characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label on new scan
     statusLabel->setText("Status: Scanning...");
     qDebug() << "Starting Bluetooth device scan...";
     scanButton->setEnabled(false);
     connectButton->setEnabled(false);
-    // readCharButton removed here
     m_serviceUuids.clear();
     m_services.clear();
-    m_characteristicItems.clear();
+    m_characteristicItems.clear(); // This map will now only track characteristics for internal logic, not for display in a list
     m_currentService = nullptr;
 
     if (leController) {
@@ -159,7 +155,7 @@ void MainWindow::deviceDiscovered(const QBluetoothDeviceInfo &device)
     if (device.coreConfigurations() & QBluetoothDeviceInfo::LowEnergyCoreConfiguration) {
         QString itemText = device.name().isEmpty() ? "(Unknown BLE Device)" : device.name();
         itemText += " (" + device.address().toString() + ")";
-        deviceComboBox->addItem(itemText); // Change: Add item to QComboBox
+        deviceComboBox->addItem(itemText);
         qDebug() << "Discovered BLE device:" << itemText;
     }
 }
@@ -169,8 +165,8 @@ void MainWindow::scanFinished()
     qDebug() << "Bluetooth scan finished.";
     statusLabel->setText("Status: Scan Finished.");
     scanButton->setEnabled(true);
-    if (deviceComboBox->count() == 0) { // Change: Check QComboBox count
-        deviceComboBox->addItem("No Bluetooth devices found."); // Change: Add item to QComboBox
+    if (deviceComboBox->count() == 0) {
+        deviceComboBox->addItem("No Bluetooth devices found.");
         connectButton->setEnabled(false);
     } else {
         connectButton->setEnabled(true);
@@ -183,7 +179,7 @@ void MainWindow::scanError(QBluetoothDeviceDiscoveryAgent::Error error)
     statusLabel->setText("Status: Scan Error!");
     scanButton->setEnabled(true);
     connectButton->setEnabled(false);
-    // readCharButton removed here
+    characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label on error
     QString errorString;
     switch (error) {
     case QBluetoothDeviceDiscoveryAgent::InputOutputError:
@@ -209,7 +205,7 @@ void MainWindow::deviceDisconnected()
     statusLabel->setText("Status: Disconnected.");
     connectButton->setEnabled(true);
     scanButton->setEnabled(true);
-    // readCharButton removed here
+    characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label on disconnect
 
     if (leController) {
         leController->deleteLater();
@@ -222,8 +218,8 @@ void MainWindow::deviceDisconnected()
     m_serviceUuids.clear();
     m_characteristicItems.clear();
     m_currentService = nullptr;
-    deviceComboBox->clear(); // Change: Clear the QComboBox
-    characteristicListWidget->clear();
+    deviceComboBox->clear();
+    // characteristicListWidget removed
 }
 
 void MainWindow::controllerStateChanged(QLowEnergyController::ControllerState state)
@@ -244,6 +240,12 @@ void MainWindow::controllerStateChanged(QLowEnergyController::ControllerState st
         break;
     case QLowEnergyController::DiscoveredState:
         statusLabel->setText("Status: Services Discovered.");
+        // After services are discovered, automatically select the first service
+        // in the combobox to trigger characteristic discovery for it.
+        // This is a simple approach since there's no characteristic list to pick from.
+        if (deviceComboBox->count() > 1) { // Check if there are actual services listed (beyond the separator)
+            deviceComboBox->setCurrentIndex(1); // Select the first actual service
+        }
         break;
     case QLowEnergyController::ClosingState:
         statusLabel->setText("Status: Disconnecting...");
@@ -263,13 +265,12 @@ void MainWindow::deviceConnected()
 
 void MainWindow::connectToDevice()
 {
-    // Change: Check if there's a selected item in QComboBox
     if (deviceComboBox->currentIndex() == -1 || deviceComboBox->currentText().contains("No Bluetooth devices found.")) {
         QMessageBox::warning(this, "No Device Selected", "Please select a device from the list to connect.");
         return;
     }
 
-    QString selectedText = deviceComboBox->currentText(); // Change: Get current text from QComboBox
+    QString selectedText = deviceComboBox->currentText();
     QBluetoothAddress deviceAddress(selectedText.section('(', -1).remove(')'));
 
     QList<QBluetoothDeviceInfo> discoveredDevices = discoveryAgent->discoveredDevices();
@@ -298,7 +299,8 @@ void MainWindow::connectToDevice()
     m_serviceUuids.clear();
     m_characteristicItems.clear();
     m_currentService = nullptr;
-    characteristicListWidget->clear();
+    // characteristicListWidget removed
+    characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label on new connection attempt
 
     leController = QLowEnergyController::createCentral(m_currentDevice, this);
     if (!leController) {
@@ -330,7 +332,7 @@ void MainWindow::connectToDevice()
 void MainWindow::serviceDiscovered(const QBluetoothUuid &uuid)
 {
     qDebug() << "Service Discovered:" << uuid.toString();
-    m_serviceUuids.append(uuid); // Store the discovered UUID
+    m_serviceUuids.append(uuid);
 }
 
 void MainWindow::serviceDiscoveryFinished()
@@ -338,14 +340,14 @@ void MainWindow::serviceDiscoveryFinished()
     qDebug() << "Service discovery finished. Found" << m_serviceUuids.count() << "services.";
     statusLabel->setText("Status: Services Discovered. Select a service.");
 
-    deviceComboBox->clear(); // Change: Clear the QComboBox
-    deviceComboBox->addItem("--- Discovered Services ---"); // Change: Add separator to QComboBox
+    deviceComboBox->clear();
+    deviceComboBox->addItem("--- Discovered Services ---");
     if (m_serviceUuids.isEmpty()) {
-        deviceComboBox->addItem("No services found on this device."); // Change: Add item to QComboBox
+        deviceComboBox->addItem("No services found on this device.");
     } else {
         for (const QBluetoothUuid &uuid : std::as_const(m_serviceUuids)) {
             QString serviceInfo = uuid.toString();
-            deviceComboBox->addItem(serviceInfo); // Change: Add item to QComboBox
+            deviceComboBox->addItem(serviceInfo);
         }
     }
     connectButton->setEnabled(false);
@@ -358,7 +360,7 @@ void MainWindow::controllerError(QLowEnergyController::Error error)
     statusLabel->setText("Status: Controller Error!");
     connectButton->setEnabled(true);
     scanButton->setEnabled(true);
-    // readCharButton removed here
+    characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label on error
     QString errorString;
     switch (error) {
     case QLowEnergyController::UnknownError:
@@ -393,42 +395,38 @@ void MainWindow::controllerError(QLowEnergyController::Error error)
     m_serviceUuids.clear();
     m_characteristicItems.clear();
     m_currentService = nullptr;
-    deviceComboBox->clear(); // Change: Clear the QComboBox
-    characteristicListWidget->clear();
+    deviceComboBox->clear();
+    // characteristicListWidget removed
 }
 
 // --- New: Service and Characteristic Interaction Slots ---
 void MainWindow::onServiceSelected()
 {
-    // Change: Check if an item is selected in QComboBox
     if (deviceComboBox->currentIndex() == -1 || !leController ||
         leController->state() != QLowEnergyController::DiscoveredState ||
-        deviceComboBox->currentText().contains("--- Discovered Services ---") || // Don't try to select the separator
+        deviceComboBox->currentText().contains("--- Discovered Services ---") ||
         deviceComboBox->currentText().contains("No services found")) {
         return;
     }
 
-    QString selectedServiceText = deviceComboBox->currentText(); // Change: Get current text from QComboBox
+    QString selectedServiceText = deviceComboBox->currentText();
     QString uuidString = selectedServiceText.split(" ").first();
     QBluetoothUuid selectedUuid(uuidString);
 
     if (m_services.contains(selectedUuid)) {
         m_currentService = m_services.value(selectedUuid);
-        qDebug() << "Service already known, displaying characteristics for:" << selectedUuid.toString();
+        qDebug() << "Service already known, handling characteristics for:" << selectedUuid.toString();
         if (m_currentService->state() == QLowEnergyService::RemoteServiceDiscovered) {
-            characteristicListWidget->clear();
-            m_characteristicItems.clear();
+            // characteristicListWidget removed, so no clearing needed here
+            characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label
+            m_characteristicItems.clear(); // Clear for the new service
+
+            // Iterate through characteristics and try to read/enable notifications
             for (const QLowEnergyCharacteristic &characteristic : m_currentService->characteristics()) {
-                QString charInfo = QString("  Char: %1 (%2) - Props: %3")
-                .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
-                    .arg(characteristic.uuid().toString())
-                    .arg(characteristic.properties());
-                QListWidgetItem *item = new QListWidgetItem(charInfo);
-                characteristicListWidget->addItem(item);
-                m_characteristicItems.insert(characteristic, item);
+                m_characteristicItems.insert(characteristic, nullptr); // Store characteristic for internal use
 
                 if (characteristic.properties() & QLowEnergyCharacteristic::Read) {
-                    m_currentService->readCharacteristic(characteristic);
+                    m_currentService->readCharacteristic(characteristic); // Triggers characteristicRead
                 }
                 if (characteristic.properties() & (QLowEnergyCharacteristic::Notify | QLowEnergyCharacteristic::Indicate)) {
                     QLowEnergyDescriptor notificationDescriptor = characteristic.descriptor(QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
@@ -444,7 +442,8 @@ void MainWindow::onServiceSelected()
         if (service) {
             m_services.insert(selectedUuid, service);
             m_currentService = service;
-            characteristicListWidget->clear();
+            // characteristicListWidget removed
+            characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label
             m_characteristicItems.clear();
 
             connect(service, &QLowEnergyService::stateChanged,
@@ -468,6 +467,7 @@ void MainWindow::onServiceSelected()
     }
 }
 
+
 void MainWindow::serviceDetailsDiscovered(QLowEnergyService::ServiceState newState)
 {
     QLowEnergyService *service = qobject_cast<QLowEnergyService*>(sender());
@@ -475,17 +475,12 @@ void MainWindow::serviceDetailsDiscovered(QLowEnergyService::ServiceState newSta
 
     if (newState == QLowEnergyService::RemoteServiceDiscovered) {
         statusLabel->setText(QString("Status: Characteristics discovered for %1.").arg(service->serviceUuid().toString()));
-        characteristicListWidget->clear(); // Clear previous characteristics
-        m_characteristicItems.clear(); // Clear previous characteristic items
+        // characteristicListWidget removed, so no clearing needed here
+        characteristicValueLabel->setText("Characteristic Value: N/A"); // Clear label
+        m_characteristicItems.clear(); // Clear for the new service
 
         for (const QLowEnergyCharacteristic &characteristic : service->characteristics()) {
-            QString charInfo = QString("  Char: %1 (%2) - Props: %3")
-            .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
-                .arg(characteristic.uuid().toString())
-                .arg(characteristic.properties());
-            QListWidgetItem *item = new QListWidgetItem(charInfo);
-            characteristicListWidget->addItem(item);
-            m_characteristicItems.insert(characteristic, item); // Store for later updates
+            m_characteristicItems.insert(characteristic, nullptr); // Store for internal use
 
             // Read value if readable
             if (characteristic.properties() & QLowEnergyCharacteristic::Read) {
@@ -496,8 +491,6 @@ void MainWindow::serviceDetailsDiscovered(QLowEnergyService::ServiceState newSta
             if (characteristic.properties() & (QLowEnergyCharacteristic::Notify | QLowEnergyCharacteristic::Indicate)) {
                 QLowEnergyDescriptor notificationDescriptor = characteristic.descriptor(QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
                 if (notificationDescriptor.isValid()) {
-                    // Write to the Client Characteristic Configuration Descriptor (CCCD)
-                    // 0x01 for notifications, 0x02 for indications
                     service->writeDescriptor(notificationDescriptor, QByteArray::fromHex("0100")); // Enable Notifications
                     qDebug() << "Enabled notifications for characteristic:" << characteristic.uuid().toString();
                 }
@@ -510,54 +503,30 @@ void MainWindow::characteristicChanged(const QLowEnergyCharacteristic &character
 {
     qDebug() << "Characteristic Changed:" << characteristic.uuid().toString() << "New Value:" << newValue.toHex();
     // Update the dedicated label with the value
-    QString valueDisplay = QString("Value: %1 (Hex) / %2")
+    //QString valueDisplay = QString("Characteristic: %1\nValue: %2 (Hex) / %3")
+    characteristicValueLabel ->clear();
+    QString valueDisplay = QString(" Value: %2 (Hex) / %3 KG")
+                               //.arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
                                .arg(newValue.toHex().toUpper())
-                               .arg(QString::fromUtf8(newValue));
+                               .arg(QString::fromUtf8(newValue)); // Try to decode as UTF-8
     characteristicValueLabel->setText(valueDisplay);
-
-    // Optionally, if you still want to update the list item's text to show the *current* value
-    // alongside its properties, you can modify the item text like this:
-/*    if (m_characteristicItems.contains(characteristic)) {
-        QListWidgetItem *item = m_characteristicItems.value(characteristic);
-        QString charInfo = QString("Char: %1 (%2)\nValue: %3 (Hex) / %4")
-                               .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
-                               .arg(characteristic.uuid().toString())
-                               .arg(newValue.toHex().toUpper())
-                               .arg(QString::fromUtf8(newValue));
-        item->setText(charInfo);
-        }
-*/
-
 }
 
 void MainWindow::characteristicRead(const QLowEnergyCharacteristic &characteristic, const QByteArray &value)
 {
     qDebug() << "Characteristic Read:" << characteristic.uuid().toString() << "Value:" << value.toHex();
     // Update the dedicated label with the value
-    QString valueDisplay = QString("Value: %1 (Hex) / %2")
+    //QString valueDisplay = QString("Characteristic: %1\nValue: %2 (Hex) / %3")
+    QString valueDisplay = QString(" Value: %2 (Hex) / %3 KG")
+                               //.arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
                                .arg(value.toHex().toUpper())
-                               .arg(QString::fromUtf8(value));
+                               .arg(QString::fromUtf8(value)); // Try to decode as UTF-8
     characteristicValueLabel->setText(valueDisplay);
-
-    // Optionally, if you still want to update the list item's text to show the *read* value
-    // alongside its properties, you can modify the item text like this:
-/*
-    if (m_characteristicItems.contains(characteristic)) {
-        QListWidgetItem *item = m_characteristicItems.value(characteristic);
-        QString charInfo = QString("Char: %1 (%2)\nValue: %3 (Hex) / %4")
-                               .arg(characteristic.name().isEmpty() ? characteristic.uuid().toString() : characteristic.name())
-                               .arg(characteristic.uuid().toString())
-                               .arg(value.toHex().toUpper())
-                               .arg(QString::fromUtf8(value));
-        item->setText(charInfo);
-    }
-*/
 }
 
 void MainWindow::descriptorWritten(const QLowEnergyDescriptor &descriptor, const QByteArray &newValue)
 {
     if (descriptor.uuid() == QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration) {
-        //qDebug() << "CCCD Written for characteristic:" << descriptor.characteristic().uuid().toString() << "Value:" << newValue.toHex();
         if (newValue == QByteArray::fromHex("0100")) {
             qDebug() << "Notifications enabled successfully.";
         } else if (newValue == QByteArray::fromHex("0200")) {
